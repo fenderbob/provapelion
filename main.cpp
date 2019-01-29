@@ -28,7 +28,6 @@
 #endif
 
 //Include for MQTT 
-#if defined(LINUX)
 #include "LinuxMQTT.h"
 #include "LinuxIPStack.h"
 #include "MQTTClient.h"
