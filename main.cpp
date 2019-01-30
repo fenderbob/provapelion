@@ -26,11 +26,7 @@
 #ifndef MBED_CONF_MBED_CLOUD_CLIENT_DISABLE_CERTIFICATE_ENROLLMENT
 #include "certificate_enrollment_user_cb.h"
 #endif
-#define MQTTCLIENT_QOS2 1 
-#include "MQTTNetwork.h"
-#include "MQTTmbed.h"
-#include "MQTTClient.h"
-#include "mbed-os/mbed.h"
+
 
 // event based LED blinker, controlled via pattern_resource
 static Blinky blinky;
@@ -47,104 +43,18 @@ static M2MResource* mqtt_res;
 // Pointer to mbedClient, used for calling close function.
 static SimpleM2MClient *client;
 
-NetworkInterface *net;
-
-int arrivedcount = 0;
- 
- 
-void messageArrived(MQTT::MessageData& md)
-{
-    MQTT::Message &message = md.message;
-    logMessage("Message arrived: qos %d, retained %d, dup %d, packetid %d\r\n", message.qos, message.retained, message.dup, message.id);
-    logMessage("Payload %.*s\r\n", message.payloadlen, (char*)message.payload);
-    mqtt_res->set_value(md.message);
-    ++arrivedcount;
-}
-
 
 int main(void)
 {
     mcc_platform_run_program(main_application);
 
-    float version = 0.6;
-    char* topic = "mbed-sample";
- 
-    logMessage("HelloMQTT: version is %.2f\r\n", version);
- 
-    net = NetworkInterface::get_default_instance();
-
-    nsapi_error_t status = net->connect();
-
-    if (status != NSAPI_ERROR_OK) {
-        printf("Connecting to the network failed %d!\n", status);
-        return -1;
-    }
- 
-    MQTTNetwork mqttNetwork(net);
- 
-    MQTT::Client<MQTTNetwork, Countdown> client(mqttNetwork);
- 
-    const char* hostname = "172.18.0.237";
-    int port = 1883;
-    logMessage("Connecting to %s:%d\r\n", hostname, port);
-    int rc = mqttNetwork.connect(hostname, port);
-    if (rc != 0)
-        logMessage("rc from TCP connect is %d\r\n", rc);
- 
-    MQTTPacket_connectData data = MQTTPacket_connectData_initializer;
-    data.MQTTVersion = 3;
-    data.clientID.cstring = "mbed-sample";
-    data.username.cstring = "testuser";
-    data.password.cstring = "testpassword";
-    if ((rc = client.connect(data)) != 0)
-        logMessage("rc from MQTT connect is %d\r\n", rc);
- 
-    if ((rc = client.subscribe(topic, MQTT::QOS2, messageArrived)) != 0)
-        logMessage("rc from MQTT subscribe is %d\r\n", rc);
- 
-    MQTT::Message message;
- 
-    // QoS 0
-    char buf[100];
-    sprintf(buf, "Hello World!  QoS 0 message from app version %f\r\n", version);
-    message.qos = MQTT::QOS0;
-    message.retained = false;
-    message.dup = false;
-    message.payload = (void*)buf;
-    message.payloadlen = strlen(buf)+1;
-    rc = client.publish(topic, message);
-    while (arrivedcount < 1)
-        client.yield(100);
- 
-    // QoS 1
-    sprintf(buf, "Hello World!  QoS 1 message from app version %f\r\n", version);
-    message.qos = MQTT::QOS1;
-    message.payloadlen = strlen(buf)+1;
-    rc = client.publish(topic, message);
-    while (arrivedcount < 2)
-        client.yield(100);
- 
-    // QoS 2
-    sprintf(buf, "Hello World!  QoS 2 message from app version %f\r\n", version);
-    message.qos = MQTT::QOS2;
-    message.payloadlen = strlen(buf)+1;
-    rc = client.publish(topic, message);
-    while (arrivedcount < 3)
-        client.yield(100);
- 
-    if ((rc = client.unsubscribe(topic)) != 0)
-        logMessage("rc from unsubscribe was %d\r\n", rc);
- 
-    if ((rc = client.disconnect()) != 0)
-        logMessage("rc from disconnect was %d\r\n", rc);
- 
-    mqttNetwork.disconnect();
- 
-    logMessage("Version %.2f: finish %d msgs\r\n", version, arrivedcount);
- 
-    return 0;
 }
 
+void get_mqtt_read(void *){
+    get_mqtt_read = system ("tail -1 /root/testmqtt/output.txt")
+    mqtt_res->set_value(get_mqtt_read);
+    mqtt_res->send_delayed_post_response();
+}
 
 void pattern_updated(const char *)
 {
@@ -292,7 +202,7 @@ void main_application(void)
 
     // Create resource for button count. Path of this resource will be: 3200/0/5501.
     mqtt_res = mbedClient.add_cloud_resource(4200, 0, 4501, "mqtt_resource", M2MResourceInstance::STRING,
-                              M2MBase::GET_ALLOWED, 0, true, NULL, (void*)mqtt_status_callback);
+                              M2MBase::GET_ALLOWED, 0, true, (void *)get_mqtt_read, NULL);
     // Create resource for button count. Path of this resource will be: 3200/0/5501.
     button_res = mbedClient.add_cloud_resource(3200, 0, 5501, "button_resource", M2MResourceInstance::INTEGER,
                               M2MBase::GET_ALLOWED, 0, true, NULL, (void*)button_status_callback);
@@ -305,6 +215,7 @@ void main_application(void)
     blink_res = mbedClient.add_cloud_resource(3201, 0, 5850, "blink_resource", M2MResourceInstance::STRING,
                              M2MBase::POST_ALLOWED, "", false, (void*)blink_callback, (void*)button_status_callback);
     // Use delayed response
+    mqtt_res->set_delayed_response(true);
     blink_res->set_delayed_response(true);
 
     // Create resource for unregistering the device. Path of this resource will be: 5000/0/1.
