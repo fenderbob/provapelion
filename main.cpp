@@ -37,6 +37,16 @@ static Blinky blinky;
 
 static void main_application(void);
 
+// Pointers to the resources that will be created in main_application().
+static M2MResource* button_res;
+static M2MResource* pattern_res;
+static M2MResource* blink_res;
+static M2MResource* mqtt_res;
+
+
+// Pointer to mbedClient, used for calling close function.
+static SimpleM2MClient *client;
+
 int arrivedcount = 0;
  
  
@@ -129,15 +139,6 @@ int main(void)
     return 0;
 }
 
-// Pointers to the resources that will be created in main_application().
-static M2MResource* button_res;
-static M2MResource* pattern_res;
-static M2MResource* blink_res;
-static M2MResource* mqtt_res;
-
-
-// Pointer to mbedClient, used for calling close function.
-static SimpleM2MClient *client;
 
 void pattern_updated(const char *)
 {
