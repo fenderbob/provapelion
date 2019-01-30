@@ -27,7 +27,6 @@
 #include "certificate_enrollment_user_cb.h"
 #endif
 #define MQTTCLIENT_QOS2 1 
-#include "easy-connect.h"
 #include "MQTTNetwork.h"
 #include "MQTTmbed.h"
 #include "MQTTClient.h"
@@ -46,6 +45,8 @@ static M2MResource* mqtt_res;
 
 // Pointer to mbedClient, used for calling close function.
 static SimpleM2MClient *client;
+
+NetworkInterface *net;
 
 int arrivedcount = 0;
  
@@ -69,12 +70,16 @@ int main(void)
  
     logMessage("HelloMQTT: version is %.2f\r\n", version);
  
-    NetworkInterface* network = easy_connect(true);
-    if (!network) {
+    net = NetworkInterface::get_default_instance();
+
+    nsapi_error_t status = net->connect();
+
+    if (status != NSAPI_ERROR_OK) {
+        printf("Connecting to the network failed %d!\n", status);
         return -1;
     }
  
-    MQTTNetwork mqttNetwork(network);
+    MQTTNetwork mqttNetwork(net);
  
     MQTT::Client<MQTTNetwork, Countdown> client(mqttNetwork);
  
