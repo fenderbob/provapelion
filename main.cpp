@@ -30,6 +30,7 @@
 #include "MQTTNetwork.h"
 #include "MQTTmbed.h"
 #include "MQTTClient.h"
+#include "mbed-os/mbed.h"
 
 // event based LED blinker, controlled via pattern_resource
 static Blinky blinky;
