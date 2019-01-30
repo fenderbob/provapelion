@@ -26,39 +26,107 @@
 #ifndef MBED_CONF_MBED_CLOUD_CLIENT_DISABLE_CERTIFICATE_ENROLLMENT
 #include "certificate_enrollment_user_cb.h"
 #endif
-
-//Include for MQTT 
-#include "LinuxMQTT.h"
-#include "LinuxIPStack.h"
+#define MQTTCLIENT_QOS2 1 
+#include "easy-connect.h"
+#include "MQTTNetwork.h"
+#include "MQTTmbed.h"
 #include "MQTTClient.h"
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <sys/param.h>
-#include <sys/time.h>
-#include <sys/select.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>
-#include <arpa/inet.h>
-#include <netdb.h>
-#include <stdio.h>
-#include <unistd.h>
-#include <errno.h>
-#include <fcntl.h>
-#include <stdlib.h>
-#include <string.h>
-#include <signal.h>
-#define DEFAULT_STACK_SIZE -1
-//Finish include MQTT
-
 
 // event based LED blinker, controlled via pattern_resource
 static Blinky blinky;
 
 static void main_application(void);
 
+int arrivedcount = 0;
+ 
+ 
+void messageArrived(MQTT::MessageData& md)
+{
+    MQTT::Message &message = md.message;
+    logMessage("Message arrived: qos %d, retained %d, dup %d, packetid %d\r\n", message.qos, message.retained, message.dup, message.id);
+    logMessage("Payload %.*s\r\n", message.payloadlen, (char*)message.payload);
+    mqtt_res->set_value(md.message);
+    ++arrivedcount;
+}
+
+
 int main(void)
 {
     mcc_platform_run_program(main_application);
+
+    float version = 0.6;
+    char* topic = "mbed-sample";
+ 
+    logMessage("HelloMQTT: version is %.2f\r\n", version);
+ 
+    NetworkInterface* network = easy_connect(true);
+    if (!network) {
+        return -1;
+    }
+ 
+    MQTTNetwork mqttNetwork(network);
+ 
+    MQTT::Client<MQTTNetwork, Countdown> client(mqttNetwork);
+ 
+    const char* hostname = "172.18.0.237";
+    int port = 1883;
+    logMessage("Connecting to %s:%d\r\n", hostname, port);
+    int rc = mqttNetwork.connect(hostname, port);
+    if (rc != 0)
+        logMessage("rc from TCP connect is %d\r\n", rc);
+ 
+    MQTTPacket_connectData data = MQTTPacket_connectData_initializer;
+    data.MQTTVersion = 3;
+    data.clientID.cstring = "mbed-sample";
+    data.username.cstring = "testuser";
+    data.password.cstring = "testpassword";
+    if ((rc = client.connect(data)) != 0)
+        logMessage("rc from MQTT connect is %d\r\n", rc);
+ 
+    if ((rc = client.subscribe(topic, MQTT::QOS2, messageArrived)) != 0)
+        logMessage("rc from MQTT subscribe is %d\r\n", rc);
+ 
+    MQTT::Message message;
+ 
+    // QoS 0
+    char buf[100];
+    sprintf(buf, "Hello World!  QoS 0 message from app version %f\r\n", version);
+    message.qos = MQTT::QOS0;
+    message.retained = false;
+    message.dup = false;
+    message.payload = (void*)buf;
+    message.payloadlen = strlen(buf)+1;
+    rc = client.publish(topic, message);
+    while (arrivedcount < 1)
+        client.yield(100);
+ 
+    // QoS 1
+    sprintf(buf, "Hello World!  QoS 1 message from app version %f\r\n", version);
+    message.qos = MQTT::QOS1;
+    message.payloadlen = strlen(buf)+1;
+    rc = client.publish(topic, message);
+    while (arrivedcount < 2)
+        client.yield(100);
+ 
+    // QoS 2
+    sprintf(buf, "Hello World!  QoS 2 message from app version %f\r\n", version);
+    message.qos = MQTT::QOS2;
+    message.payloadlen = strlen(buf)+1;
+    rc = client.publish(topic, message);
+    while (arrivedcount < 3)
+        client.yield(100);
+ 
+    if ((rc = client.unsubscribe(topic)) != 0)
+        logMessage("rc from unsubscribe was %d\r\n", rc);
+ 
+    if ((rc = client.disconnect()) != 0)
+        logMessage("rc from disconnect was %d\r\n", rc);
+ 
+    mqttNetwork.disconnect();
+ 
+    logMessage("Version %.2f: finish %d msgs\r\n", version, arrivedcount);
+ 
+    return 0;
 }
 
 // Pointers to the resources that will be created in main_application().
@@ -66,6 +134,7 @@ static M2MResource* button_res;
 static M2MResource* pattern_res;
 static M2MResource* blink_res;
 static M2MResource* mqtt_res;
+
 
 // Pointer to mbedClient, used for calling close function.
 static SimpleM2MClient *client;
@@ -132,10 +201,13 @@ void button_status_callback(const M2MBase& object,
 }
 
 // This function is called when a POST request is received for resource 5000/0/1.
-void unregister(void *)
+void unregister(void)
 {
     printf("Unregister resource executed\n");
     client->close();
+}
+void mqtt_status_callback(void *){
+    printf("Mqtt \n");
 }
 
 // This function is called when a POST request is received for resource 5000/0/2.
@@ -150,48 +222,9 @@ void factory_reset(void *)
         printf("Factory reset completed. Now restart the device\n");
     }
 }
-void mqtt_status_callback(void)
+
+void main_application(void)
 {
-    printf("Mqtt message \n");
-}
-
-//Start MQTT
-int arrivedcount = 0;
-
-void messageArrived(MQTT::Message* message)
-{   
-    mqtt_res->set_value(message);
-    printf("Message %d arrived: qos %d, retained %d, dup %d, packetid %d\n", 
-        ++arrivedcount, message->qos, message->retained, message->dup, message->id);
-    printf("Payload %.*s\n", message->payloadlen, (char*)message->payload);
-}
-
-
-int connect(MQTT::Client<IPStack, Countdown>::connectionLostInfo* info)
-{
-    const char* hostname = "172.18.0.237"; //"m2m.eclipse.org";
-    int port = 1883;
-    printf("Connecting to %s:%d\n", hostname, port);
-    int rc = info->network->connect(hostname, port);
-    if (rc != 0)
-        printf("rc from TCP connect is %d\n", rc);
- 
-    MQTTPacket_connectData data = MQTTPacket_connectData_initializer;       
-    data.MQTTVersion = 3;
-    data.clientID.cstring = (char*)"mbed-icraggs";
-    rc = info->client->connect(&data);
-    if (rc != 0)
-        printf("rc from MQTT connect is %d\n", rc);
-    
-    return rc;
-}
-// End MQTT
-
-void main_application(void, int argc, char* argv[])
-{
-    IPStack ipstack = IPStack();
-    const char* topic = "mbed-sample";
-
 #if defined(__linux__) && (MBED_CONF_MBED_TRACE_ENABLE == 0)
         // make sure the line buffering is on as non-trace builds do
         // not produce enough output to fill the buffer
@@ -250,7 +283,6 @@ void main_application(void, int argc, char* argv[])
     print_stack_statistics();
 #endif
 
-
     // Create resource for button count. Path of this resource will be: 3200/0/5501.
     mqtt_res = mbedClient.add_cloud_resource(4200, 0, 4501, "mqtt_resource", M2MResourceInstance::STRING,
                               M2MBase::GET_ALLOWED, 0, true, NULL, (void*)mqtt_status_callback);
@@ -285,62 +317,6 @@ void main_application(void, int argc, char* argv[])
 
 
     // Check if client is registering or registered, if true sleep and repeat.
-
-    MQTT::Client<IPStack, Countdown> client = MQTT::Client<IPStack, Countdown>(ipstack);
-    
-    client.setConnectionLostHandler(connect);
-
-    MQTT::Client<IPStack, Countdown>::connectionLostInfo info = {&client, &ipstack};
-    int rc = connect(&info);
-    
-    rc = client.subscribe(topic, MQTT::QOS2, messageArrived);   
-    if (rc != 0)
-        printf("rc from MQTT subscribe is %d\n", rc);
-
-    MQTT::Message message;
-
-    // QoS 0
-    char buf[100];
-    sprintf(buf, "Hello World!  QoS 0 message from app version %f", version);
-    message.qos = MQTT::QOS0;
-    message.retained = false;
-    message.dup = false;
-    message.payload = (void*)buf;
-    message.payloadlen = strlen(buf)+1;
-    rc = client.publish(topic, &message);
-    while (arrivedcount == 0)
-        client.yield(100);
-        
-    // QoS 1
-    printf("Now QoS 1\n");
-    sprintf(buf, "Hello World!  QoS 1 message from app version %f", version);
-    message.qos = MQTT::QOS1;
-    message.payloadlen = strlen(buf)+1;
-    rc = client.publish(topic, &message);
-    while (arrivedcount == 1)
-        client.yield(100);
-        
-    // QoS 2
-    sprintf(buf, "Hello World!  QoS 2 message from app version %f", version);
-    message.qos = MQTT::QOS2;
-    message.payloadlen = strlen(buf)+1;
-    rc = client.publish(topic, &message);
-    while (arrivedcount == 2)
-        client.yield(100);
-    
-    rc = client.unsubscribe(topic);
-    if (rc != 0)
-        printf("rc from unsubscribe was %d\n", rc);
-    
-    rc = client.disconnect();
-    if (rc != 0)
-        printf("rc from disconnect was %d\n", rc);
-    
-    ipstack.disconnect();
-    
-    printf("Finishing with %d messages received\n", arrivedcount);
-    
-    return 0;
 
     while (mbedClient.is_register_called()) {
         static int button_count = 0;
